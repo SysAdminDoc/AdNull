@@ -2,6 +2,8 @@
 
 A userscript that automatically detects and blocks TikTok ads, with manual blocking for video posters and commenters. Maintains a persistent block list with import/export functionality.
 
+<img width="500" height="702" alt="2026-01-01 05_31_29-Greenshot" src="https://github.com/user-attachments/assets/21051cd5-24ee-4b8b-9d8b-f5941dccbd51" />
+
 ## Features
 
 - **Auto-detect ads** – Identifies sponsored content using multiple detection methods
