@@ -2,6 +2,8 @@
 
 A userscript that automatically detects and blocks Facebook sponsored posts and reels, with manual blocking for any account. Features an auto-scrolling scanner, persistent logs, and flexible export options.
 
+<img width="565" height="587" alt="2026-01-01 05_31_56-C__Users_Admin_Desktop_Facebook AdNull Blocker user js - Notepad++  Administrato" src="https://github.com/user-attachments/assets/d41b8633-5fd6-45b5-9017-953f6cc70747" />
+
 ## Features
 
 - **Auto-detect sponsored content** – Identifies ads in your feed and reels
