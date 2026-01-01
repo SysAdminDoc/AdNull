@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook AdNull Blocker
 // @namespace    https://github.com/SysAdminDoc/AdNull
-// @version      5.8
+// @version      5.9
 // @description  Block buttons on ALL posts & reels, auto-skip sponsored reels, foundation blocklist auto-import.
 // @author       Matthew Parker
 // @icon         https://www.google.com/s2/favicons?sz=32&domain=facebook.com
@@ -1179,7 +1179,7 @@
         dash.id = 'fb-foundation-dash';
         dash.innerHTML = `
             <div class="dash-header" id="dash-drag-handle">
-                <h3>🚫 AdNull FB v5.8</h3>
+                <h3>🚫 AdNull FB v5.9</h3>
                 <div class="dash-controls">
                     <button id="dash-start" class="dash-btn start">▶ Start</button>
                     <button id="dash-stop" class="dash-btn stop" style="display:none;">⏹ Stop</button>
@@ -1539,6 +1539,35 @@
         updateSpeedButtons();
         updateDashboardCounts();
         populateExistingLog();
+        
+        // Queue any unblocked entries from master log (handles page refresh)
+        queuePendingEntries();
+    }
+
+    // Queue entries from master log that haven't been blocked yet
+    function queuePendingEntries() {
+        let queued = 0;
+        
+        for (const entry of state.masterLog) {
+            // Skip if already blocked
+            if (state.blockedSponsors.has(entry.url)) continue;
+            if (entry.blocked) continue;
+            
+            // Skip if already in queue
+            if (state.blockQueue.some(q => q.url === entry.url)) continue;
+            
+            // Add to queue
+            state.blockQueue.push({ url: entry.url, author: entry.author });
+            queued++;
+            
+            // Update row status to pending if visible
+            updateRowStatus(entry.url, 'pending');
+        }
+        
+        if (queued > 0) {
+            log(`Queued ${queued} pending entries from master log`);
+            updateDashboardCounts();
+        }
     }
 
     function populateExistingLog() {
@@ -1555,9 +1584,17 @@
         const row = document.createElement('tr');
         row.dataset.url = entry.url;
 
-        const status = entry.blocked ? 'blocked' :
-                       state.blockedSponsors.has(entry.url) ? 'blocked' : 'known';
-        const statusText = status === 'blocked' ? '✓ Blocked' : '○ Known';
+        // Determine status: blocked > pending > known
+        let status, statusText;
+        if (entry.blocked || state.blockedSponsors.has(entry.url)) {
+            status = 'blocked';
+            statusText = '✓ Blocked';
+        } else {
+            // Not blocked - should be pending (will be queued)
+            status = 'pending';
+            statusText = '⏳ Pending';
+        }
+        
         const source = entry.source || 'feed';
 
         row.innerHTML = `
@@ -2095,7 +2132,7 @@
     // ==================== INIT ====================
 
     function start() {
-        log('Scanner v5.7 Starting...');
+        log('Scanner v5.9 Starting...');
         log(`Page type: ${isReelsPage() ? 'REELS' : isFeedPage() ? 'FEED' : 'OTHER'}`);
 
         if (isBlockingTab() && isProfilePage()) {
@@ -2129,7 +2166,11 @@
             }
         }, 500);
 
-        if (shouldAutoStart()) {
+        // Auto-start if there are pending entries in queue OR if autostart is enabled
+        if (shouldAutoStart() || state.blockQueue.length > 0) {
+            if (state.blockQueue.length > 0) {
+                log(`Auto-starting: ${state.blockQueue.length} pending entries in queue`);
+            }
             setTimeout(startScanner, 2000);
         }
 
@@ -2180,6 +2221,13 @@
             reimportFoundation: () => {
                 resetFoundationImport();
                 importFoundationBlocklist();
+            },
+            requeuePending: () => {
+                queuePendingEntries();
+                log('Re-queued pending entries');
+                if (state.blockQueue.length > 0 && !state.isBlocking) {
+                    processBlockQueue();
+                }
             }
         };
     }
@@ -2191,4 +2239,3 @@
     }
 
 })();
-
