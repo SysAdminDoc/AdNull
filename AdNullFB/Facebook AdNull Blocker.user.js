@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         Facebook AdNull Blocker
-// @namespace    http://tampermonkey.net/
-// @version      5.5
-// @description  Block buttons on ALL posts & reels, auto-skip sponsored reels, separate export for manual vs auto-detected.
+// @namespace    https://github.com/SysAdminDoc/AdNull
+// @version      5.7
+// @description  Block buttons on ALL posts & reels, auto-skip sponsored reels, foundation blocklist auto-import.
 // @author       Matthew Parker
+// @icon         https://www.google.com/s2/favicons?sz=32&domain=facebook.com
+// @icon64       https://www.google.com/s2/favicons?sz=64&domain=facebook.com
 // @match        https://www.facebook.com/*
 // @match        https://m.facebook.com/*
 // @match        https://web.facebook.com/*
@@ -11,8 +13,12 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_openInTab
+// @grant        GM_xmlhttpRequest
 // @grant        window.close
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
+// @downloadURL  https://github.com/SysAdminDoc/AdNull/raw/refs/heads/main/AdNullFB/Facebook%20AdNull%20Blocker.user.js
+// @updateURL    https://github.com/SysAdminDoc/AdNull/raw/refs/heads/main/AdNullFB/Facebook%20AdNull%20Blocker.user.js
 // ==/UserScript==
 
 (function() {
@@ -24,6 +30,10 @@
         scanInterval: 500,
         reelsScanInterval: 1500,  // Slower for reels (they auto-advance)
         dashboardRows: 150,
+
+        // Foundation blocklist - imported on first run
+        foundationBlocklistUrl: 'https://raw.githubusercontent.com/SysAdminDoc/AdNull/refs/heads/main/Blocklists/facebook_master_blocklist.csv',
+        autoImportFoundation: true,  // Set to false to disable auto-import
 
         // Speed presets (scroll delay in ms, scroll amount in px)
         speeds: {
@@ -374,6 +384,116 @@
         }
         result.push(current);
         return result;
+    }
+
+    // ==================== FOUNDATION BLOCKLIST ====================
+    function hasImportedFoundation() {
+        return GM_getValue('fb_foundation_imported_v1', false);
+    }
+
+    function setFoundationImported() {
+        GM_setValue('fb_foundation_imported_v1', true);
+    }
+
+    function resetFoundationImport() {
+        GM_setValue('fb_foundation_imported_v1', false);
+        log('Foundation import flag reset - will re-import on next load');
+    }
+
+    function importFoundationBlocklist() {
+        if (!CONFIG.autoImportFoundation) {
+            log('Foundation blocklist auto-import disabled');
+            return;
+        }
+
+        if (hasImportedFoundation()) {
+            log('Foundation blocklist already imported');
+            return;
+        }
+
+        log('Fetching foundation blocklist...');
+        updateDashboardStatus('📥 Importing foundation blocklist...');
+
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: CONFIG.foundationBlocklistUrl,
+            onload: function(response) {
+                if (response.status === 200) {
+                    processFoundationCSV(response.responseText);
+                } else {
+                    log(`Failed to fetch foundation blocklist: ${response.status}`);
+                    updateDashboardStatus('⚠️ Foundation import failed');
+                }
+            },
+            onerror: function(error) {
+                log('Error fetching foundation blocklist:', error);
+                updateDashboardStatus('⚠️ Foundation import error');
+            }
+        });
+    }
+
+    function processFoundationCSV(csv) {
+        const lines = csv.split('\n');
+
+        if (lines.length < 2) {
+            log('Foundation blocklist empty or invalid');
+            return;
+        }
+
+        let imported = 0;
+        let skipped = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+
+            const fields = parseCSVLine(line);
+            if (fields.length < 2) continue;
+
+            const author = fields[0].replace(/^"|"$/g, '').replace(/""/g, '"');
+            const url = fields[1].trim();
+            const content = fields[2] ? fields[2].replace(/^"|"$/g, '').replace(/""/g, '"') : '';
+
+            if (!url || !url.includes('facebook.com')) {
+                skipped++;
+                continue;
+            }
+
+            if (state.masterLogUrls.has(url)) {
+                skipped++;
+                continue;
+            }
+
+            const entry = {
+                url: url,
+                author: author || 'Foundation List',
+                content: content,
+                source: 'foundation',
+                timestamp: Date.now(),
+                blocked: false
+            };
+
+            state.masterLog.unshift(entry);
+            state.masterLogUrls.add(url);
+            imported++;
+
+            // Don't add to dashboard to avoid spam - just log
+            if (!state.blockedSponsors.has(url)) {
+                state.blockQueue.push({ url: url, author: entry.author });
+            }
+        }
+
+        saveMasterLog();
+        setFoundationImported();
+        updateDashboardCounts();
+
+        log(`Foundation blocklist imported: ${imported} entries, ${skipped} skipped`);
+        updateDashboardStatus(`✓ Foundation: ${imported} imported`);
+
+        // Start processing queue if scanner is running
+        if (imported > 0 && state.isRunning && !state.isBlocking) {
+            processBlockQueue();
+        }
     }
 
     // ==================== FEED DETECTION LOGIC ====================
@@ -840,9 +960,72 @@
         }
     }
 
+    // Check if page shows "content not available" (already blocked, deleted, or private)
+    function isPageUnavailable() {
+        const pageText = document.body?.innerText || '';
+        const unavailablePatterns = [
+            /this content isn't available/i,
+            /this page isn't available/i,
+            /this account has been disabled/i,
+            /sorry, this content isn't available/i,
+            /the link you followed may be broken/i,
+            /page not found/i
+        ];
+
+        for (const pattern of unavailablePatterns) {
+            if (pattern.test(pageText)) {
+                return true;
+            }
+        }
+
+        // Also check for the specific "Go to Feed" button that appears on unavailable pages
+        const goToFeedLink = document.querySelector('a[aria-label="Go to Feed"]');
+        if (goToFeedLink && /go back|visit help center/i.test(pageText)) {
+            return true;
+        }
+
+        return false;
+    }
+
     async function runBlockingTab() {
         sessionStorage.setItem('fb_autoblock_active', '1');
 
+        // Wait for page to load
+        await sleep(CONFIG.tabOpenDelay);
+
+        // Check if page is unavailable (already blocked, deleted, or private)
+        if (isPageUnavailable()) {
+            log('Page unavailable - already blocked or deleted, skipping');
+
+            // Show quick status
+            const overlay = document.createElement('div');
+            overlay.innerHTML = `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:999999;
+                display:flex;align-items:center;justify-content:center;">
+                <div style="background:#1a1a2e;color:white;padding:40px;border-radius:20px;text-align:center;">
+                    <div style="font-size:50px;margin-bottom:20px;">✓</div>
+                    <div style="font-size:20px;font-weight:bold;color:#4CAF50;">Already Blocked/Unavailable</div>
+                    <div style="font-size:14px;color:#888;margin-top:10px;">Closing...</div>
+                </div></div>`;
+            document.body.appendChild(overlay);
+
+            // Signal completion with special "already blocked" indicator
+            GM_setValue('fb_block_complete_signal', Date.now());
+            GM_setValue('fb_block_already_blocked', true);
+            log('Signaled already-blocked to main tab');
+
+            await sleep(800);
+
+            // Close tab
+            const tryClose = () => {
+                try { window.close(); } catch(e) {}
+                try { self.close(); } catch(e) {}
+            };
+            tryClose();
+            setTimeout(tryClose, 300);
+            return;
+        }
+
+        // Normal blocking flow
         const overlay = document.createElement('div');
         overlay.innerHTML = `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:999999;
             display:flex;align-items:center;justify-content:center;">
@@ -852,13 +1035,13 @@
             </div></div>`;
         document.body.appendChild(overlay);
 
-        await sleep(CONFIG.tabOpenDelay);
         const success = await executeBlockSequence();
 
         document.getElementById('block-status').textContent = success ? '✓ BLOCKED!' : '✗ Failed';
         document.getElementById('block-status').style.color = success ? '#4CAF50' : '#f44336';
 
         GM_setValue('fb_block_complete_signal', Date.now());
+        GM_setValue('fb_block_already_blocked', false);
         log('Signaled completion to main tab');
 
         await sleep(1000);
@@ -900,6 +1083,7 @@
         markAsBlockedInLog(sponsor.url);
 
         GM_setValue('fb_block_complete_signal', 0);
+        GM_setValue('fb_block_already_blocked', false);
 
         const blockUrl = sponsor.url + (sponsor.url.includes('?') ? '&' : '?') + '__autoblock=1';
 
@@ -919,7 +1103,14 @@
 
             const currentSignal = GM_getValue('fb_block_complete_signal', 0);
             if (currentSignal > startSignal) {
-                log('Blocking tab signaled completion');
+                const wasAlreadyBlocked = GM_getValue('fb_block_already_blocked', false);
+                if (wasAlreadyBlocked) {
+                    log('Page was already blocked/unavailable');
+                    updateRowStatus(sponsor.url, 'skipped');
+                } else {
+                    log('Blocking tab signaled completion');
+                    updateRowStatus(sponsor.url, 'blocked');
+                }
                 if (blockTab && typeof blockTab.close === 'function') {
                     try { blockTab.close(); } catch(e) {}
                 }
@@ -936,12 +1127,11 @@
             try { blockTab.close(); } catch(e) {}
         }
 
-        updateRowStatus(sponsor.url, 'blocked');
         state.isBlocking = false;
         updateDashboardStatus(state.isRunning ? '📜 Scanning...' : 'Idle');
         updateDashboardCounts();
 
-        await sleep(1500);
+        await sleep(800);  // Reduced delay for faster processing of already-blocked items
 
         if (state.blockQueue.length > 0 && state.isRunning) {
             processBlockQueue();
@@ -1133,6 +1323,7 @@
             .status-pending { color: #ff9800; }
             .status-blocking { color: #2196F3; }
             .status-blocked { color: #4CAF50; }
+            .status-skipped { color: #9C27B0; font-style: italic; }
             .status-known { color: #666; font-style: italic; }
 
             .source-feed { color: #888; }
@@ -1469,6 +1660,7 @@
                     if (status === 'pending') statusText = '⏳ Pending';
                     else if (status === 'blocking') statusText = '🔄 Blocking';
                     else if (status === 'blocked') statusText = '✓ Blocked';
+                    else if (status === 'skipped') statusText = '⏭ Already Blocked';
                     statusCell.textContent = statusText;
                     statusCell.className = `status-${status}`;
                 }
@@ -1903,7 +2095,7 @@
     // ==================== INIT ====================
 
     function start() {
-        log('Scanner v5.5 Starting...');
+        log('Scanner v5.7 Starting...');
         log(`Page type: ${isReelsPage() ? 'REELS' : isFeedPage() ? 'FEED' : 'OTHER'}`);
 
         if (isBlockingTab() && isProfilePage()) {
@@ -1918,6 +2110,9 @@
         }
 
         initDashboard();
+
+        // Import foundation blocklist on first run
+        importFoundationBlocklist();
 
         // Passive scanning always runs
         setInterval(scan, CONFIG.scanInterval);
@@ -1981,6 +2176,10 @@
                 state.blockQueue = [];
                 updateDashboardCounts();
                 log('Queue cleared');
+            },
+            reimportFoundation: () => {
+                resetFoundationImport();
+                importFoundationBlocklist();
             }
         };
     }
