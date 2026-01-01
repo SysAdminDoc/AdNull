@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Facebook AdNull Blocker
 // @namespace    https://github.com/SysAdminDoc/AdNull
-// @version      5.7
+// @version      5.8
 // @description  Block buttons on ALL posts & reels, auto-skip sponsored reels, foundation blocklist auto-import.
 // @author       Matthew Parker
 // @icon         https://www.google.com/s2/favicons?sz=32&domain=facebook.com
@@ -1179,7 +1179,7 @@
         dash.id = 'fb-foundation-dash';
         dash.innerHTML = `
             <div class="dash-header" id="dash-drag-handle">
-                <h3>🚫 Sponsor Blocker v5.5</h3>
+                <h3>🚫 AdNull FB v5.8</h3>
                 <div class="dash-controls">
                     <button id="dash-start" class="dash-btn start">▶ Start</button>
                     <button id="dash-stop" class="dash-btn stop" style="display:none;">⏹ Stop</button>
@@ -2191,3 +2191,4 @@
     }
 
 })();
+
