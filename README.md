@@ -44,8 +44,8 @@ The scripts handle everything automatically. You just scroll (or let auto-scroll
 
 | Platform | Script | Features |
 |----------|--------|----------|
-| **Facebook** | [Facebook AdNull Blocker](./facebook/) | Feed scanning, Reels support, auto-scroll, speed presets, manual blocking on any post |
-| **TikTok** | [TikTok AdNull Blocker](./tiktok/) | Feed scanning, auto-skip ads, comment blocking, captcha-friendly waits |
+| **Facebook** | [Facebook AdNull Blocker](https://github.com/SysAdminDoc/AdNull/raw/refs/heads/main/AdNullFB/Facebook%20AdNull%20Blocker.user.js) | Feed scanning, Reels support, auto-scroll, speed presets, manual blocking on any post |
+| **TikTok** | [TikTok AdNull Blocker](https://github.com/SysAdminDoc/AdNull/raw/refs/heads/main/AdNullTT/TikTok%20AdNull%20Blocker.user.js) | Feed scanning, auto-skip ads, comment blocking, captcha-friendly waits |
 
 ## Quick Start
 
